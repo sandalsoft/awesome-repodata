@@ -37,10 +37,10 @@ github.misc.getRateLimit({}, function (err, res) {
     let pctLeft = (remaining / limit * 100.00)
     let timeLeft = moment.unix(res.resources.core.reset).fromNow()
     log.info(`Rate Limit info!`)
-    log.info(`\t\tLimit: ${limit}`)
-    log.info(`\t\tRemaining: ${remaining}`)
-    log.info(`\t\t${pctLeft}% left`)
-    log.info(`\t\tRests ${timeLeft}`)
+    log.info(`\tLimit: ${limit}`)
+    log.info(`\tRemaining: ${remaining}`)
+    log.info(`\t${pctLeft}% left`)
+    log.info(`\tResets ${timeLeft}`)
   }
 })
 
@@ -57,18 +57,15 @@ getReadme(readmeUrl)
     let categoryName = repos[0].replace(/\W/g, '')
     log.debug('CategoryName: ' + categoryName)
     repos.map(repoLine => {
-      log.debug(repoLine)
-      let repoRe = /^\* \[(.*?)\]\(https:\/\/github\.com\/(.+?)\/(.+?)\)/gmi
-      let match = repoRe.exec(repoLine)
+      let ownerName = extractRepoOwnerName(repoLine)
+      if (ownerName === 'undefined' || ownerName === null) { return }
 
-      if (match === null) return
+      let owner = ownerName[0]
+      let name = ownerName[1]
 
-      let owner = match[2]
-      let repoName = match[3]
-
-      getNumStarsForRepo(owner, repoName)
-      .then(numStars => {
-        log.debug(`\t\t\t${owner}/${repoName} has ${numStars}`)
+      getRepo(owner, name)
+      .then(repo => {
+        log.info(`${repo.full_name} has ${repo.stargazers_count} stars`)
       })// then
   .catch(error => log.error(error))
     })// map
@@ -78,6 +75,16 @@ getReadme(readmeUrl)
 /**
  *
  */
+function extractRepoOwnerName (repoLine) {
+  log.debug(`Parsing owner from repoLine: ${repoLine}`)
+  let repoRe = /^\* \[(.*?)\]\(https:\/\/github\.com\/(.+?)\/(.+?)\)/gmi
+  let match = repoRe.exec(repoLine)
+
+  if (match === null) return null
+  // return [sandalsoft, awesome-reponame]
+  return [match[2], match[3]]
+}
+
 
 function parseReadmeIntoCategories (readme) {
   return readme.split(categorySplitString)
@@ -98,25 +105,40 @@ function getReadme (readmeUrl) {
   })// promise
 }// getReadme()
 
-function getNumStarsForRepo (repoOwner, repoName) {
+function getRepo (owner, name) {
+  log.debug(`Getting stars for ${owner}/${name}`)
   return new Promise(function (resolve, reject) {
-    github.activity.getStargazersForRepo({
-      owner: repoOwner,
-      repo: repoName
+    github.repos.get({
+      owner: owner,
+      repo: name
     }, function (err, response) {
-      if (response !== null || response !== 'undefined') {
-        log.debug('RESPONSE: ' + response)
-      }
-      // if (response.statusCode === 403) {
-      //   log.info('Forbidden headers: ' + response.headers)
-      // }
       if (err) {
-        log.error(`Error getting stars for repo ${repoOwner}/${repoName}`)
+        log.error(`Error getting stars for repo ${owner}/${name}`)
         log.error(`\t\t${err}`)
-        process.exit(1)
         reject(err)
       } else {
-        resolve(response.length)
+        // log.debug('Repo.get Response: ' + JSON.stringify(response))
+        resolve(response)
+      }
+    })// github.
+  })// promise
+}// getNumStarsForRepo()
+
+function getNumStarsForRepo (repoObj) {
+  log.debug(`Getting stars for ${JSON.stringify(repoObj)}`)
+  return new Promise(function (resolve, reject) {
+    github.repos.get({
+      owner: repoObj.owner,
+      repo: repoObj.repoName
+    }, function (err, response) {
+      if (err) {
+        log.error(`Error getting stars for repo ${repoObj.owner}/${repoObj.name}`)
+        log.error(`\t\t${err}`)
+        reject(err)
+      } else {
+        log.debug('Repo.get Response: ' + JSON.stringify(response))
+        repoObj.numStars = response.stargazers_count
+        resolve(repoObj.numStars)
       }
     })// github.
   })// promise
