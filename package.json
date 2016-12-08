@@ -12,6 +12,7 @@
   "dependencies": {
     "github": "^7.0.1",
     "marked": "^0.3.6",
+    "moment": "^2.17.1",
     "needle": "^1.4.2",
     "winston": "^2.3.0"
   }
