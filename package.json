@@ -1,0 +1,18 @@
+{
+  "name": "awesome-repodata",
+  "version": "0.0.1",
+  "description": "Fetches Github metadata of projects listed in awesome-* projects and creates a sorted list for the readme",
+  "main": "index.js",
+  "repository": {
+    "url": "git@github.com:sandalsoft/awesome-repodata.git",
+    "type": "git"
+  },
+  "author": "Eric Nelson",
+  "license": "MIT",
+  "dependencies": {
+    "github": "^7.0.1",
+    "marked": "^0.3.6",
+    "needle": "^1.4.2",
+    "winston": "^2.3.0"
+  }
+}
