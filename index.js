@@ -52,29 +52,77 @@ let readmeUrl = 'https://raw.githubusercontent.com/sandalsoft/awesome-repodata/m
 getReadme(readmeUrl)
 .then(readme => {
   let categoryList = parseReadmeIntoCategories(readme)
+  var sortedRepos = []
+
   categoryList.map(category => {
-    let repos = category.split('\n')
-    let categoryName = repos[0].replace(/\W/g, '')
+    let projectLines = category.split('\n')
+    let categoryName = projectLines[0].replace(/\W/g, '')
     log.debug('CategoryName: ' + categoryName)
-    repos.map(repoLine => {
-      let ownerName = extractRepoOwnerName(repoLine)
-      if (ownerName === 'undefined' || ownerName === null) { return }
+    Promise.all(projectLines
+      .filter(isRepoLine)
+      .map(makeRepoFromLine)
+      ).then(unsortedRepos => {
+        sortedRepos = sortRepos(unsortedRepos)
+        return sortedRepos
+      }).then(sortedRepos => {
 
-      let owner = ownerName[0]
-      let name = ownerName[1]
+        sortedRepos.map(repo => log.info(repo.stargazers_count))
+        // log.info('finished sorted repos! -> ' + sortedRepos)
+      })
+  })// categoryListmap
 
-      getRepo(owner, name)
-      .then(repo => {
-        log.info(`${repo.full_name} has ${repo.stargazers_count} stars`)
-      })// then
-  .catch(error => log.error(error))
-    })// map
-  })// map
 })// then
 
 /**
+ * 
  *
  */
+function addCategoryToRepo (repo, category) {
+  log.info('add: ' + JSON.stringify(repo))
+  repo.category = category
+  return repo
+}
+
+function sortRepos (unsortedRepos) {
+  log.info('length: ' + unsortedRepos.length)
+  var reposSortedByStars = unsortedRepos.slice(0)
+  reposSortedByStars.sort(function (a, b) {
+    return a.stargazers_count - b.stargazers_count
+  })// sort
+  return reposSortedByStars
+}
+function makeRepoFromLine (repoLine) {
+  return new Promise(function (resolve, reject) {
+    let owner = extractRepoOwnerName(repoLine)[0]
+    let name = extractRepoOwnerName(repoLine)[1]
+    // log.info(name)
+    getRepo(owner, name)
+    .then(repo => {
+      log.info('make: ' + repo.full_name)
+      resolve(repo)
+    })
+    .catch(error => reject(error))
+  })// promise
+}// function
+
+function addRepoToArray(category, repo, theArray) {
+  return new Promise(function (resolve, reject) {
+    repo.category = category
+    // log.info(`${repo.category}: ${repo.full_name} has ${repo.stargazers_count} stars`)
+    theArray.push(repo)
+    log.info(`inside: ${theArray.length}`)
+  })
+}
+
+function isRepoLine(line) {
+  if (extractRepoOwnerName(line)) { 
+    // log.info('y')
+    return true
+  } else {
+    return false
+  }
+}
+
 function extractRepoOwnerName (repoLine) {
   log.debug(`Parsing owner from repoLine: ${repoLine}`)
   let repoRe = /^\* \[(.*?)\]\(https:\/\/github\.com\/(.+?)\/(.+?)\)/gmi
