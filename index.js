@@ -35,7 +35,7 @@ github.misc.getRateLimit({}, function (err, res) {
     log.error('Error getting Github Rate Limit')
     log.error(`\t\t${err}`)
   } else {
-    log.info('Ratelimit payload: ' + JSON.stringify(res.resources.core))
+    log.debug('Ratelimit payload: ' + JSON.stringify(res.resources.core))
     let limit = res.resources.core.limit
     let remaining = res.resources.core.remaining
     let pctLeft = (remaining / limit * 100.00)
@@ -59,8 +59,7 @@ getReadme(readmeUrl)
 .then(readme => {
   let categoryList = parseReadmeIntoCategories(readme)
   var sortedRepos = []
-  var sortedCategories = []
-
+  let sortProperty = 'size'
   categoryList.map(categoryLines => {
     // The category .name and .repos[] object
     var categoryObj = {}
@@ -69,27 +68,27 @@ getReadme(readmeUrl)
     let categoryName = projectLines[0].replace(/\W/g, '')
     categoryObj.name = categoryName // Category = {name: 'Animation', repos: []}
 
-    log.info('Category: ' + categoryObj.name)
     let repoLines = projectLines.filter(isRepoLine)
-
-    let repoPromiseList = Promise.all(repoLines.map(makeRepoFromLine))
-
+    Promise.all(repoLines.map(makeRepoFromLine))
     // categoryList.map() has returned before Promise.all resolves all repos
-    repoPromiseList.then(repoList => {
-      repoList.map(repo => {
-        log.info('\t ' + repo.full_name + ' -->  ' + repo.stargazers_count)
+    .then(repoList => {
+      return new Promise(function (resolve, reject) {
+        let unsortedRepos = repoList.map(repo => {
+          repo.category = categoryName
+          // log.info(repo.category + '\t ' + repo.full_name + ' -->  ' + repo.stargazers_count)
+          return repo
+        })
+        sortedRepos = sortObjectsBy(unsortedRepos, sortProperty, SortDirection.Ascending)
+        // sortedRepos = sortRepos(unsortedRepos)
+        resolve(sortedRepos)
       })
     })
-    // Promise.all(projectLines
-    //  -  .filter(isRepoLine)
-    //   .map(makeRepoFromLine)
-    //   ).then(unsortedRepos => {
-    //     sortedRepos = sortRepos(unsortedRepos)
-    //     return sortedRepos
-    //   }).then(sortedRepos => {
-    //     sortedRepos.map(repo => log.info(repo.stargazers_count))
-    //     // log.info('finished sorted repos! -> ' + sortedRepos)
-    //   })
+    .then(sortedRepos => {
+      log.info('Category: ' + sortedRepos[0]['category'])
+      sortedRepos.map(repo => {
+        log.info('\t ' + repo.full_name + ' --[' + sortProperty + ']->  ' + repo[sortProperty])
+      })
+    })
   })// categoryListmap
 })// then
 
@@ -97,19 +96,14 @@ getReadme(readmeUrl)
  *
  *
  */
-function addCategoryToRepo (repo, category) {
-  log.info('add: ' + JSON.stringify(repo))
-  repo.category = category
-  return repo
-}
 
 function sortObjectsBy (unsortedObjs, sortProperty, sortDirection) {
   var sortedObjs = unsortedObjs.slice(0)
   sortedObjs.sort(function (a, b) {
     if (sortDirection === SortDirection.Ascending) {
-      return a.sortProperty - b.sortProperty
+      return a[sortProperty] - b[sortProperty]
     } else {
-      return b.sortProperty - a.sortProperty
+      return b[sortProperty] - a[sortProperty]
     }
   })// sort
   return sortedObjs
@@ -136,15 +130,6 @@ function makeRepoFromLine (repoLine) {
     .catch(error => reject(error))
   })// promise
 }// function
-
-function addRepoToArray (category, repo, theArray) {
-  return new Promise(function (resolve, reject) {
-    repo.category = category
-    // log.info(`${repo.category}: ${repo.full_name} has ${repo.stargazers_count} stars`)
-    theArray.push(repo)
-    log.info(`inside: ${theArray.length}`)
-  })
-}
 
 function isRepoLine (line) {
   if (extractRepoOwnerName(line)) {
@@ -203,61 +188,3 @@ function getRepo (owner, name) {
   })// promise
 }// getNumStarsForRepo()
 
-function getNumStarsForRepo (repoObj) {
-  log.debug(`Getting stars for ${JSON.stringify(repoObj)}`)
-  return new Promise(function (resolve, reject) {
-    github.repos.get({
-      owner: repoObj.owner,
-      repo: repoObj.repoName
-    }, function (err, response) {
-      if (err) {
-        log.error(`Error getting stars for repo ${repoObj.owner}/${repoObj.name}`)
-        log.error(`\t\t${err}`)
-        reject(err)
-      } else {
-        log.debug('Repo.get Response: ' + JSON.stringify(response))
-        repoObj.numStars = response.stargazers_count
-        resolve(repoObj.numStars)
-      }
-    })// github.
-  })// promise
-}// getNumStarsForRepo()
-
-// Blatantly copy-pasta'd from http://machinesaredigging.com/2014/04/27/binary-insert-how-to-keep-an-array-sorted-as-you-insert-data-in-it/
-function binaryInsert (value, array, startVal, endVal) {
-  var length = array.length
-  var start = typeof startVal !== 'undefined' ? startVal : 0
-  var end = typeof endVal !== 'undefined' ? endVal : length - 1 // !! endVal could be 0 don't use || syntax
-  var m = start + Math.floor((end - start) / 2)
-
-  if (length === 0) {
-    array.push(value)
-    return
-  }
-
-  if (value > array[end]) {
-    array.splice(end + 1, 0, value)
-    return
-  }
-
-  if (value < array[start]) {
-    array.splice(start, 0, value)
-    return
-  }
-
-  if (start >= end) {
-    return
-  }
-
-  if (value < array[m]) {
-    binaryInsert(value, array, start, m - 1)
-    return
-  }
-
-  if (value > array[m]) {
-    binaryInsert(value, array, m + 1, end)
-    return
-  }
-
-  // we don't insert duplicates
-}
