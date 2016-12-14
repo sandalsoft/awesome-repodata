@@ -1,13 +1,17 @@
 const request = require('needle')
 const GitHubApi = require('github')
-var moment = require('moment')
-// moment().format('mm')
+const distanceInWordsStrict = require('date-fns/distance_in_words_strict')
+
 const log = require('winston')
 log.level = process.env['NODE_LOG_LEVEL'] || 'info'
 
+var SortDirection = {
+  Ascending: 'Ascending',
+  Descending: 'Descending'
+}
+
 const githubAPIToken = process.env['GITHUB_API_TOKEN']
 let categorySplitString = '###'
-
 var github = new GitHubApi({
   debug: false,
   protocol: 'https',
@@ -31,11 +35,13 @@ github.misc.getRateLimit({}, function (err, res) {
     log.error('Error getting Github Rate Limit')
     log.error(`\t\t${err}`)
   } else {
-    log.debug('Ratelimit payload: ' + JSON.stringify(res.resources.core))
+    log.info('Ratelimit payload: ' + JSON.stringify(res.resources.core))
     let limit = res.resources.core.limit
     let remaining = res.resources.core.remaining
     let pctLeft = (remaining / limit * 100.00)
-    let timeLeft = moment.unix(res.resources.core.reset).fromNow()
+    let timeLeft = distanceInWordsStrict(new Date(res.resources.core.reset * 1000),
+                          new Date(),
+                          {unit: 'm'})
     log.info(`Rate Limit info!`)
     log.info(`\tLimit: ${limit}`)
     log.info(`\tRemaining: ${remaining}`)
@@ -53,34 +59,60 @@ getReadme(readmeUrl)
 .then(readme => {
   let categoryList = parseReadmeIntoCategories(readme)
   var sortedRepos = []
+  var sortedCategories = []
 
-  categoryList.map(category => {
-    let projectLines = category.split('\n')
+  categoryList.map(categoryLines => {
+    // The category .name and .repos[] object
+    var categoryObj = {}
+
+    let projectLines = categoryLines.split('\n')
     let categoryName = projectLines[0].replace(/\W/g, '')
-    log.debug('CategoryName: ' + categoryName)
-    Promise.all(projectLines
-      .filter(isRepoLine)
-      .map(makeRepoFromLine)
-      ).then(unsortedRepos => {
-        sortedRepos = sortRepos(unsortedRepos)
-        return sortedRepos
-      }).then(sortedRepos => {
+    categoryObj.name = categoryName // Category = {name: 'Animation', repos: []}
 
-        sortedRepos.map(repo => log.info(repo.stargazers_count))
-        // log.info('finished sorted repos! -> ' + sortedRepos)
+    log.info('Category: ' + categoryObj.name)
+    let repoLines = projectLines.filter(isRepoLine)
+
+    let repoPromiseList = Promise.all(repoLines.map(makeRepoFromLine))
+
+    // categoryList.map() has returned before Promise.all resolves all repos
+    repoPromiseList.then(repoList => {
+      repoList.map(repo => {
+        log.info('\t ' + repo.full_name + ' -->  ' + repo.stargazers_count)
       })
+    })
+    // Promise.all(projectLines
+    //  -  .filter(isRepoLine)
+    //   .map(makeRepoFromLine)
+    //   ).then(unsortedRepos => {
+    //     sortedRepos = sortRepos(unsortedRepos)
+    //     return sortedRepos
+    //   }).then(sortedRepos => {
+    //     sortedRepos.map(repo => log.info(repo.stargazers_count))
+    //     // log.info('finished sorted repos! -> ' + sortedRepos)
+    //   })
   })// categoryListmap
-
 })// then
 
 /**
- * 
+ *
  *
  */
 function addCategoryToRepo (repo, category) {
   log.info('add: ' + JSON.stringify(repo))
   repo.category = category
   return repo
+}
+
+function sortObjectsBy (unsortedObjs, sortProperty, sortDirection) {
+  var sortedObjs = unsortedObjs.slice(0)
+  sortedObjs.sort(function (a, b) {
+    if (sortDirection === SortDirection.Ascending) {
+      return a.sortProperty - b.sortProperty
+    } else {
+      return b.sortProperty - a.sortProperty
+    }
+  })// sort
+  return sortedObjs
 }
 
 function sortRepos (unsortedRepos) {
@@ -98,14 +130,14 @@ function makeRepoFromLine (repoLine) {
     // log.info(name)
     getRepo(owner, name)
     .then(repo => {
-      log.info('make: ' + repo.full_name)
+      // log.info('make: ' + repo.full_name)
       resolve(repo)
     })
     .catch(error => reject(error))
   })// promise
 }// function
 
-function addRepoToArray(category, repo, theArray) {
+function addRepoToArray (category, repo, theArray) {
   return new Promise(function (resolve, reject) {
     repo.category = category
     // log.info(`${repo.category}: ${repo.full_name} has ${repo.stargazers_count} stars`)
@@ -114,8 +146,8 @@ function addRepoToArray(category, repo, theArray) {
   })
 }
 
-function isRepoLine(line) {
-  if (extractRepoOwnerName(line)) { 
+function isRepoLine (line) {
+  if (extractRepoOwnerName(line)) {
     // log.info('y')
     return true
   } else {
@@ -132,7 +164,6 @@ function extractRepoOwnerName (repoLine) {
   // return [sandalsoft, awesome-reponame]
   return [match[2], match[3]]
 }
-
 
 function parseReadmeIntoCategories (readme) {
   return readme.split(categorySplitString)
