@@ -5,10 +5,22 @@ const distanceInWordsStrict = require('date-fns/distance_in_words_strict')
 const log = require('winston')
 log.level = process.env['NODE_LOG_LEVEL'] || 'info'
 
-var SortDirection = {
+let SortDirection = {
   Ascending: 'Ascending',
   Descending: 'Descending'
 }
+
+let SortProperty = {
+  Stars: 'stargazers_count',
+  Forks: 'forks',
+  LastUpdate: 'updated_at',
+  Issues: 'open_issues_count',
+  Name: 'name',
+  FullName: 'full_name'
+}
+
+let sortDirection = SortDirection.Ascending
+let sortProperty = SortProperty.Forks
 
 const githubAPIToken = process.env['GITHUB_API_TOKEN']
 let categorySplitString = '###'
@@ -17,9 +29,7 @@ var github = new GitHubApi({
   protocol: 'https',
   host: 'api.github.com',
   headers: { 'User-Agent': 'sandalsoft/awesome-repodata' },
-  // Promise: require('bluebird'),
-  // followRedirects: false, // default: true there's currently an issue with non-get redirects, so allow ability to disable follow-redirects
-  timeout: 2500
+  timeout: 5000
 })
 
 github.authenticate({
@@ -50,16 +60,14 @@ github.misc.getRateLimit({}, function (err, res) {
   }
 })
 
-// let repoOwner = 'ikesyo'
-// let repoName = 'Himotoki'
 let readmeUrl = 'https://raw.githubusercontent.com/sandalsoft/awesome-repodata/master/test/fixtures/readme_fixture.md'
 
 // INSERT COIN
 getReadme(readmeUrl)
 .then(readme => {
+  log.info(`got initial base readme from github`)
   let categoryList = parseReadmeIntoCategories(readme)
-  var sortedRepos = []
-  let sortProperty = 'size'
+  // var sortedRepos = []
   categoryList.map(categoryLines => {
     // The category .name and .repos[] object
     var categoryObj = {}
@@ -69,26 +77,35 @@ getReadme(readmeUrl)
     categoryObj.name = categoryName // Category = {name: 'Animation', repos: []}
 
     let repoLines = projectLines.filter(isRepoLine)
-    Promise.all(repoLines.map(makeRepoFromLine))
+    Promise.all(repoLines.map(fetchRepoFromLine))
     // categoryList.map() has returned before Promise.all resolves all repos
     .then(repoList => {
+      log.info(`I have all repos now # ${repoList.length}`)
       return new Promise(function (resolve, reject) {
         let unsortedRepos = repoList.map(repo => {
           repo.category = categoryName
           // log.info(repo.category + '\t ' + repo.full_name + ' -->  ' + repo.stargazers_count)
           return repo
         })
-        sortedRepos = sortObjectsBy(unsortedRepos, sortProperty, SortDirection.Ascending)
-        // sortedRepos = sortRepos(unsortedRepos)
+        let sortedRepos = sortObjectsBy(unsortedRepos, sortProperty, sortDirection)
+        // log.error('repos finished sorting!')
         resolve(sortedRepos)
-      })
-    })
+      })// new Promise
+    })// .then(repoList)
+    .catch(error => log.error(`error with repoList ${error}`))
     .then(sortedRepos => {
-      log.info('Category: ' + sortedRepos[0]['category'])
-      sortedRepos.map(repo => {
-        log.info('\t ' + repo.full_name + ' --[' + sortProperty + ']->  ' + repo[sortProperty])
-      })
-    })
+      log.info('1')
+      // process.exit(1)
+      if (sortedRepos.length < 1) {
+        log.info('BROKE ASS >> :' + sortedRepos)
+      } else {
+        log.info('Category: ' + sortedRepos[0].category)
+        sortedRepos.map(repo => {
+          log.info('\t ' + repo.full_name + ' --[' + sortProperty + ']->  ' + repo[sortProperty])
+        })// sortedRepos.map
+      } // else
+    })// then()
+    .catch(error => log.error(`error with sortedRepos ${error}`))
   })// categoryListmap
 })// then
 
@@ -98,33 +115,65 @@ getReadme(readmeUrl)
  */
 
 function sortObjectsBy (unsortedObjs, sortProperty, sortDirection) {
-  var sortedObjs = unsortedObjs.slice(0)
-  sortedObjs.sort(function (a, b) {
-    if (sortDirection === SortDirection.Ascending) {
-      return a[sortProperty] - b[sortProperty]
-    } else {
-      return b[sortProperty] - a[sortProperty]
-    }
-  })// sort
-  return sortedObjs
+  var sortedObjs = []
+  if (sortProperty === SortProperty.LastUpdate) {
+    sortedObjs = unsortedObjs.slice(0).sort(function (a, b) {
+      if (sortDirection === SortDirection.Ascending) {
+        return new Date(a[sortProperty]) - new Date(b[sortProperty])
+      } else {
+        return new Date(b[sortProperty]) - new Date(a[sortProperty])
+      }
+    })
+  } else {
+    sortedObjs = unsortedObjs.slice(0).sort(function (a, b) {
+      if (sortDirection === SortDirection.Ascending) {
+        return a[sortProperty].toString().localeCompare(b[sortProperty].toString(), 'en', {'sensitivity': 'base'})
+      } else {
+        return b[sortProperty].toString().localeCompare(a[sortProperty].toString(), 'en', {'sensitivity': 'base'})
+      }
+    })
+    return sortedObjs
+  }
 }
 
-function sortRepos (unsortedRepos) {
-  log.info('length: ' + unsortedRepos.length)
-  var reposSortedByStars = unsortedRepos.slice(0)
-  reposSortedByStars.sort(function (a, b) {
-    return a.stargazers_count - b.stargazers_count
-  })// sort
-  return reposSortedByStars
+// function sortObjectsBy (unsortedObjs, sortProperty, sortDirection) {
+//   let sortFunction = sortProperty === SortProperty.LastUpdate ? dateSortFunction : sortByAlphaNumericProperty
+//   if (sortProperty === SortProperty.LastUpdate) {
+//     return unsortedObjs.slice(0).sort(function(a,b) {
+
+//     })
+//   }
+//   // var elvisLives = Math.PI > 4 ? "Yep" : "Nope";
+//   let sortedObjs = unsortedObjs.slice(0).sort(sortFunction)
+//   return sortedObjs
+// }
+
+function sortByAlphaNumericProperty (a, b, sortProperty, sortDirection) {
+  // log.info('Alpha sort on: ' + sortProperty)
+  if (sortDirection === SortDirection.Ascending) {
+    return a[sortProperty].toString().localeCompare(b[sortProperty].toString(), 'en', {'sensitivity': 'base'})
+  } else {
+    return b[sortProperty].toString().localeCompare(a[sortProperty].toString(), 'en', {'sensitivity': 'base'})
+  }
 }
-function makeRepoFromLine (repoLine) {
+
+function sortByDateProperty (a, b, sortProperty, sortDirection) {
+  // log.info('Date sort on: ' + sortProperty)
+  if (sortDirection === SortDirection.Ascending) {
+    return new Date(a[sortProperty]) - new Date(b[sortProperty])
+  } else {
+    return new Date(b[sortProperty]) - new Date(a[sortProperty])
+  }
+}
+
+function fetchRepoFromLine (repoLine) {
+  let owner = extractRepoOwnerName(repoLine)[0]
+  let name = extractRepoOwnerName(repoLine)[1]
+  log.info(`Starting asyc fetch of ${name}`)
   return new Promise(function (resolve, reject) {
-    let owner = extractRepoOwnerName(repoLine)[0]
-    let name = extractRepoOwnerName(repoLine)[1]
-    // log.info(name)
     getRepo(owner, name)
     .then(repo => {
-      // log.info('make: ' + repo.full_name)
+      log.info(`resolving: ${repo.full_name}`)
       resolve(repo)
     })
     .catch(error => reject(error))
