@@ -1,9 +1,11 @@
 const request = require('needle')
 const GitHubApi = require('github')
 const distanceInWordsStrict = require('date-fns/distance_in_words_strict')
-
+const async = require('async')
 const log = require('winston')
 log.level = process.env['NODE_LOG_LEVEL'] || 'info'
+
+let categorySplitString = '###'
 
 let SortDirection = {
   Ascending: 'Ascending',
@@ -19,11 +21,11 @@ let SortProperty = {
   FullName: 'full_name'
 }
 
-let sortDirection = SortDirection.Ascending
-let sortProperty = SortProperty.Forks
+let sortDirection = SortDirection.Descending
+let sortProperty = SortProperty.Stars
 
 const githubAPIToken = process.env['GITHUB_API_TOKEN']
-let categorySplitString = '###'
+
 var github = new GitHubApi({
   debug: false,
   protocol: 'https',
@@ -36,9 +38,6 @@ github.authenticate({
   type: 'token',
   token: githubAPIToken
 })
-
-// info: Rate Limit data: {
-// "resources":{"core":{"limit":5000,"remaining":4994,"reset":1481184442},"search":{"limit":30,"remaining":30,"reset":1481182219},"graphql":{"limit":200,"remaining":200,"reset":1481185759}},"rate":{"limit":5000,"remaining":4994,"reset":1481184442},"meta":{"x-ratelimit-limit":"5000","x-ratelimit-remaining":"4994","x-ratelimit-reset":"1481184442","x-oauth-scopes":"notifications, public_repo, read:org, read:repo_hook, repo:status, repo_deployment","x-github-request-id":"49086F56:4B42:4D2F24:58490BCF","status":"200 OK"}}
 
 github.misc.getRateLimit({}, function (err, res) {
   if (err) {
@@ -62,52 +61,131 @@ github.misc.getRateLimit({}, function (err, res) {
 
 let readmeUrl = 'https://raw.githubusercontent.com/sandalsoft/awesome-repodata/master/test/fixtures/readme_fixture.md'
 
-// INSERT COIN
+function getRepoLinesBruh (categoryLines) {
+  var categoryObj = {}
+
+  let projectLines = categoryLines.split('\n')
+  let categoryName = projectLines[0].replace(/\W/g, '')
+  categoryObj.name = categoryName // Category = {name: 'Animation', repos: []}
+
+  let repoLines = projectLines.filter(isRepoLine)
+  // repoLines.map(l => { log.info(`++${l}`) })
+  return repoLines
+}
+
+// New promise.all() way
+//
+
+function parseCategoryNameFromStanza (stanza) {
+  // parses the category.  stanza doesn't have ###, the split deleted them
+  let match = stanza.match(/^ (.+)/g)
+  if (match) return match[0].trim()
+}
+
 getReadme(readmeUrl)
 .then(readme => {
   log.info(`got initial base readme from github`)
-  let categoryList = parseReadmeIntoCategories(readme)
-  // var sortedRepos = []
-  categoryList.map(categoryLines => {
-    // The category .name and .repos[] object
-    var categoryObj = {}
+  let categoryStanzas = parseReadmeIntoCategories(readme)
 
-    let projectLines = categoryLines.split('\n')
-    let categoryName = projectLines[0].replace(/\W/g, '')
+  let c = categoryStanzas.map(stanza => {
+    var categoryObj = {}
+    let categoryName = parseCategoryNameFromStanza(stanza)
     categoryObj.name = categoryName // Category = {name: 'Animation', repos: []}
 
-    let repoLines = projectLines.filter(isRepoLine)
-    Promise.all(repoLines.map(fetchRepoFromLine))
-    // categoryList.map() has returned before Promise.all resolves all repos
-    .then(repoList => {
-      log.info(`I have all repos now # ${repoList.length}`)
-      return new Promise(function (resolve, reject) {
-        let unsortedRepos = repoList.map(repo => {
-          repo.category = categoryName
-          // log.info(repo.category + '\t ' + repo.full_name + ' -->  ' + repo.stargazers_count)
-          return repo
-        })
-        let sortedRepos = sortObjectsBy(unsortedRepos, sortProperty, sortDirection)
-        // log.error('repos finished sorting!')
-        resolve(sortedRepos)
-      })// new Promise
-    })// .then(repoList)
-    .catch(error => log.error(`error with repoList ${error}`))
-    .then(sortedRepos => {
-      log.info('1')
-      // process.exit(1)
-      if (sortedRepos.length < 1) {
-        log.info('BROKE ASS >> :' + sortedRepos)
-      } else {
-        log.info('Category: ' + sortedRepos[0].category)
-        sortedRepos.map(repo => {
-          log.info('\t ' + repo.full_name + ' --[' + sortProperty + ']->  ' + repo[sortProperty])
-        })// sortedRepos.map
-      } // else
-    })// then()
-    .catch(error => log.error(`error with sortedRepos ${error}`))
-  })// categoryListmap
-})// then
+    categoryObj.projectLines = stanza.split('\n')
+
+    return categoryObj
+  })// categoryStanzas.map
+
+  let categoryObjs = c.filter(cat => { if (cat.name) return cat })
+
+  categoryObjs.forEach(categoryObj => {
+    let repoLines = categoryObj.projectLines.filter(isRepoLine)
+    log.error(`HOW BIG IS IT?!?!: ${repoLines.length}`)
+    async.concat(repoLines, fetchRepoFromLine, function (err, githubRepos) {
+      if (err) log.error(`fucking error!: ${err}`)
+
+      categoryObj.repos = sortObjectsBy(githubRepos, sortProperty, sortDirection)
+      categoryObj.projectLines = null
+
+      categoryObj.repos.map(repo => {
+        log.info('Category: ' + categoryObj.name)
+        log.info('\t ' + repo.full_name + ' --[' + sortProperty + ']->  ' + repo[sortProperty])
+      })
+    })
+    // Promise.all(repoLines.map(fetchRepoFromLine))
+    // .catch(err => log.error(`error fetching repos: ${err}`))
+    // .then(githubRepos => {
+    //   log.info(githubRepos)
+    //   process.exit(1)
+    //   // categoryObj.repos = sortObjectsBy(githubRepos, sortProperty, sortDirection)
+    //   // categoryObj.projectLines = null
+    //   // Promise.resolve(categoryObj)
+    // })
+  })
+})// getReadme.then
+
+  // repoLines.map(l => {
+  //   debugger
+  //   log.info(`++${l}`)
+  // })
+  // // let repoLines = getRepoLinesBruh(categoryList)
+  // var repoPromises = []
+
+  // repoLines.map(repo => {
+  //   log.info(`repo: ${repo}`)
+  //   repoPromises.push(fetchRepoFromLine(repo))
+  // })
+  // process.exit(1)
+  // Promise.all(repoPromises)
+  // .then(repos => log.info(`I have all repos now # ${repos.length}`))
+  // .catch(err => log.error(`I fucked it up: ${err}`))
+
+// INSERT COIN
+// getReadme(readmeUrl)
+// .then(readme => {
+//   log.info(`got initial base readme from github`)
+//   let categoryList = parseReadmeIntoCategories(readme)
+//   // var sortedRepos = []
+//   categoryList.map(categoryLines => {
+//     // The category .name and .repos[] object
+//     var categoryObj = {}
+
+//     let projectLines = categoryLines.split('\n')
+//     let categoryName = projectLines[0].replace(/\W/g, '')
+//     categoryObj.name = categoryName // Category = {name: 'Animation', repos: []}
+
+//     let repoLines = projectLines.filter(isRepoLine)
+//     Promise.all(repoLines.map(fetchRepoFromLine))
+//     // categoryList.map() has returned before Promise.all resolves all repos
+//     .then(repoList => {
+//       log.info(`I have all repos now # ${repoList.length}`)
+//       return new Promise(function (resolve, reject) {
+//         let unsortedRepos = repoList.map(repo => {
+//           repo.category = categoryName
+//           // log.info(repo.category + '\t ' + repo.full_name + ' -->  ' + repo.stargazers_count)
+//           return repo
+//         })
+//         let sortedRepos = sortObjectsBy(unsortedRepos, sortProperty, sortDirection)
+//         // log.error('repos finished sorting!')
+//         resolve(sortedRepos)
+//       })// new Promise
+//     })// .then(repoList)
+//     .catch(error => log.error(`error with repoList ${error}`))
+//     .then(sortedRepos => {
+//       // process.exit(1)
+//       if (sortedRepos.length < 1) {
+//         log.info('BROKE ASS >> :' + sortedRepos)
+//       } else {
+//         log.info('Category: ' + sortedRepos[0].category)
+//         sortedRepos.map(repo => {
+//           log.info('\t ' + repo.full_name + ' --[' + sortProperty + ']->  ' + repo[sortProperty])
+//         })// sortedRepos.map
+//       } // else
+//     })// then()
+//     .catch(error => log.error(`error with sortedRepos ${error}`))
+//   })// categoryListmap
+// })// then
 
 /**
  *
@@ -167,6 +245,7 @@ function sortByDateProperty (a, b, sortProperty, sortDirection) {
 }
 
 function fetchRepoFromLine (repoLine) {
+  log.info(`repoLine: ${repoLine}`)
   let owner = extractRepoOwnerName(repoLine)[0]
   let name = extractRepoOwnerName(repoLine)[1]
   log.info(`Starting asyc fetch of ${name}`)
@@ -182,7 +261,6 @@ function fetchRepoFromLine (repoLine) {
 
 function isRepoLine (line) {
   if (extractRepoOwnerName(line)) {
-    // log.info('y')
     return true
   } else {
     return false
